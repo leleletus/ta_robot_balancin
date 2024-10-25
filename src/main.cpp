@@ -8,8 +8,9 @@
 XSpaceV21Board OBJ;
 XSThing IOT;
 
-int Ts = 30; // Tiempo de muestreo en milisegundos
+int Ts = 0; // Tiempo de muestreo en milisegundos
 double u = 5; // Voltaje de entrada
+double setpoint=5; // Valor recibido para sp
 int pin1 = 22; // Pin 1 para acelerómetro
 int pin2 = 23; // Pin 2 para giroscopio
 double VM = 5; // Voltaje máximo del driver
@@ -17,7 +18,6 @@ float ax, ay, az; // Variables para aceleración
 float gx, gy, gz; // Variables para giroscopio
 double inclinacion; // Ángulo de inclinación
 double vel_M1, vel_M2, pos_M1, pos_M2; // Velocidad y posición angular
-double setpoint; // Valor recibido para sp
 int k = 0; // Inicialización global
 
 // Configuración de redes WiFi
@@ -78,7 +78,7 @@ void ref_sp(char* topicx, byte* Data, unsigned int DataLen) {
 }
 
 // Tarea para captura y envío de datos de aceleración y giroscopio
-void tarea_2(void *pvParameters) {
+void tarea_imu(void *pvParameters) {
   while (1) {
     OBJ.BMI088_GetAccelData(&ax, &ay, &az);
     OBJ.BMI088_GetGyroData(&gx, &gy, &gz);
@@ -104,13 +104,16 @@ void tarea_2(void *pvParameters) {
     //IOT.Mqtt_Publish("sensor/acceleration", String(ax) + "," + String(ay) + "," + String(az));
     //IOT.Mqtt_Publish("sensor/gyroscope", String(gx) + "," + String(gy) + "," + String(gz));
     
-    vTaskDelay(Ts / portTICK_PERIOD_MS);
+    vTaskDelay(Ts);
   }
+vTaskDelete(NULL);
 }
 
 // Tarea para captura y envío de datos de velocidad y posición angular
-void tarea_1(void *pvParameters) {
+void tarea_encoder(void *pvParameters) {
   while (1) {
+
+    u=setpoint;
     OBJ.DRV8837_Voltage(DRVx1, u);
     OBJ.DRV8837_Voltage(DRVx2, u);
 
@@ -139,8 +142,9 @@ void tarea_1(void *pvParameters) {
 
     IOT.Mqtt_CheckBuffer(); // Verifica si hay nueva información publicada
 
-    vTaskDelay(Ts / portTICK_PERIOD_MS);
+    vTaskDelay(Ts);
   }
+  vTaskDelete(NULL);
 }
 
 void setup() {
@@ -164,8 +168,8 @@ void setup() {
   IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
 
 
-  xTaskCreatePinnedToCore(tarea_1, "Tarea1", 4000, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(tarea_2, "Tarea2", 4000, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(tarea_imu, "Tarea1", 4000, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(tarea_encoder, "Tarea2", 4000, NULL, 2, NULL, 0);
 }
 
 void loop() {
