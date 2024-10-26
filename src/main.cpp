@@ -8,11 +8,11 @@
 XSpaceV21Board OBJ;
 XSThing IOT;
 
-int Ts = 0; // Tiempo de muestreo en milisegundos
+int Ts = 10; // Tiempo de muestreo en milisegundos
 double u = 5; // Voltaje de entrada
 double setpoint=5; // Valor recibido para sp
-int pin1 = 22; // Pin 1 para acelerómetro
-int pin2 = 23; // Pin 2 para giroscopio
+int pin1 = 0; // Pin 1 para acelerómetro
+int pin2 = 5; // Pin 2 para giroscopio
 double VM = 5; // Voltaje máximo del driver
 float ax, ay, az; // Variables para aceleración
 float gx, gy, gz; // Variables para giroscopio
