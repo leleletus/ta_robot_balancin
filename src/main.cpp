@@ -77,75 +77,62 @@ void ref_sp(char* topicx, byte* Data, unsigned int DataLen) {
   }
 }
 
-// Tarea para captura y envío de datos de aceleración y giroscopio
-void tarea_imu(void *pvParameters) {
+// Tarea combinada para captura y envío de datos de aceleración, giroscopio, velocidad y posición angular
+void tarea_1(void *pvParameters) {
   while (1) {
+    // **IMU** - Captura de datos de aceleración y giroscopio
     OBJ.BMI088_GetAccelData(&ax, &ay, &az);
     OBJ.BMI088_GetGyroData(&gx, &gy, &gz);
     inclinacion = OBJ.BMI088_GetPitch_Accel();
 
+    // Mostrar datos de IMU en Serial
     Serial.print("Inclinación: "); 
     Serial.println(inclinacion);
     Serial.print("Aceleración [x, y, z]: ");
-    Serial.print(ax);
-    Serial.print("\t");
-    Serial.print(ay);
-    Serial.print("\t");
-    Serial.println(az);
+    Serial.print(ax); Serial.print("\t"); Serial.print(ay); Serial.print("\t"); Serial.println(az);
     Serial.print("Giroscopio [x, y, z]: ");
-    Serial.print(gx);
-    Serial.print("\t");
-    Serial.print(gy);
-    Serial.print("\t");
-    Serial.println(gz);
+    Serial.print(gx); Serial.print("\t"); Serial.print(gy); Serial.print("\t"); Serial.println(gz);
 
-    // Enviar datos a MQTT
+    // Enviar datos de IMU a MQTT
     IOT.Mqtt_Publish("sensor/inclinacion", inclinacion);
     //IOT.Mqtt_Publish("sensor/acceleration", String(ax) + "," + String(ay) + "," + String(az));
     //IOT.Mqtt_Publish("sensor/gyroscope", String(gx) + "," + String(gy) + "," + String(gz));
-    
-    vTaskDelay(Ts);
-  }
-vTaskDelete(NULL);
-}
 
-// Tarea para captura y envío de datos de velocidad y posición angular
-void tarea_encoder(void *pvParameters) {
-  while (1) {
-
-    u=setpoint;
+    // **Encoders y Control de Motores** - Captura de datos de velocidad y posición
+    u = setpoint;  // Actualizar el voltaje de entrada según el setpoint recibido
     OBJ.DRV8837_Voltage(DRVx1, u);
     OBJ.DRV8837_Voltage(DRVx2, u);
 
     vel_M1 = OBJ.GetEncoderSpeed(E1, DEGREES_PER_SECOND);
     pos_M1 = OBJ.GetEncoderPosition(E1, DEGREES);
-
     vel_M2 = OBJ.GetEncoderSpeed(E2, DEGREES_PER_SECOND);
     pos_M2 = OBJ.GetEncoderPosition(E2, DEGREES);
 
-    Serial.print("Velocidad_M1: ");
-    Serial.print(vel_M1);
-    Serial.print(" Posición_M1: ");
-    Serial.println(pos_M1);
+    // Mostrar datos de velocidad y posición en Serial
+    Serial.print("Velocidad_M1:  Posición_M1:");
+    Serial.print(vel_M1); Serial.print("\t"); Serial.println(pos_M1);
+    
+    // Mostrar datos de velocidad y posición en Serial
+    Serial.print("Velocidad_M2:  Posición_M2:");
+    Serial.print(vel_M2); Serial.print("\t"); Serial.println(pos_M2);
 
-    Serial.print("Velocidad_M2: ");
-    Serial.print(vel_M2);
-    Serial.print(" Posición_M2: ");
-    Serial.println(pos_M2);
-
-    // Enviar datos a MQTT
+    // Enviar datos de velocidad y posición a MQTT
     IOT.Mqtt_Publish("motor/velocidad_M1", vel_M1);
     IOT.Mqtt_Publish("motor/posicion_M1", pos_M1);
     IOT.Mqtt_Publish("motor/velocidad_M2", vel_M2);
     IOT.Mqtt_Publish("motor/posicion_M2", pos_M2);
-    
 
-    IOT.Mqtt_CheckBuffer(); // Verifica si hay nueva información publicada
+    // Verificar si hay nueva información publicada en el buffer MQTT
+    IOT.Mqtt_CheckBuffer();
 
+    // Delay según el tiempo de muestreo
     vTaskDelay(Ts);
   }
+
+  // Eliminar tarea en caso de salida del bucle (opcional, usualmente innecesario en FreeRTOS)
   vTaskDelete(NULL);
 }
+
 
 void setup() {
   Serial.begin(115200);
@@ -168,8 +155,8 @@ void setup() {
   IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
 
 
-  xTaskCreatePinnedToCore(tarea_imu, "Tarea1", 4000, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(tarea_encoder, "Tarea2", 4000, NULL, 2, NULL, 0);
+  xTaskCreatePinnedToCore(tarea_1, "Tarea1", 4000, NULL, 1, NULL, 0);
+  //xTaskCreatePinnedToCore(tarea_encoder, "Tarea2", 4000, NULL, 2, NULL, 0);
 }
 
 void loop() {
