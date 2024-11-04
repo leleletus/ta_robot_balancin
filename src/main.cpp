@@ -3,6 +3,7 @@
 #include <XSpaceIoT.h>
 //#include <XSControl.h> // Required for motor control functions
 #include "WiFi.h"
+#include <BluetoothSerial.h>
 
 // Configuración de la placa y variables
 XSpaceV21Board OBJ;
@@ -20,9 +21,51 @@ double inclinacion; // Ángulo de inclinación
 double vel_M1, vel_M2, pos_M1, pos_M2; // Velocidad y posición angular
 int k = 0; // Inicialización global
 
+
+BluetoothSerial SerialBT;
+uint16_t  joystickY = 0;
+String nombreDispositivo;
+
+// Función para generar un nombre único basado en la dirección MAC
+String genera_nombre_unico() {
+  // Obtén la dirección MAC del ESP32
+  String macAddress = WiFi.macAddress();
+
+  // Extraer los últimos 2 bytes de la dirección MAC como sufijo
+  String suffix = macAddress.substring(macAddress.length() - 5);  // Últimos 2 bytes de la MAC
+  suffix.replace(":", "");  // Elimina los dos puntos (:) de la dirección MAC
+
+  // Generar el nombre único para el dispositivo
+  return "Balancin_" + suffix;
+}
+
+// Función para inicializar el Bluetooth con el nombre generado
+void configurarBluetooth() {
+  nombreDispositivo = genera_nombre_unico();
+  SerialBT.begin(nombreDispositivo);  
+  Serial.println("Bluetooth Iniciado con el nombre: " + nombreDispositivo);
+}
+
+// Función para recibir la posición del joystick
+void recibirdatos() { // al enviar 0x01F401F4 recibo F4 01 F4 01 little-endian
+  if (SerialBT.available()) { // Verificar si hay disponibles
+    uint8_t datos[2]; // para guardar los datos de 8 bits o sea 2 serian para x y 2 para y
+    SerialBT.readBytes(datos, 2); // Leer los 2 bytes
+
+    // Convertir los bytes en un valor de 16 bits
+    joystickY = (datos[1] << 8) | datos[0]; // Little-endian
+
+
+    Serial.print(" Y: ");
+    Serial.println(joystickY);
+
+  }
+}
+
+
 // Configuración de redes WiFi
-const char* ssidList[] = {"redpucp", "Machado Ferrer", "djvemo's S24U"};
-const char* passwordList[] = {"C9AA28BA93", "0932Admin0", "0611000019"};
+const char* ssidList[] = {"redpucp", "Machado Ferrer", "djvemo's S24U", "fibra-legacy-2.4Ghz"};
+const char* passwordList[] = {"C9AA28BA93", "0932Admin0", "0611000019", "V2Uh6u5V"};
 int numNetworks = sizeof(ssidList) / sizeof(ssidList[0]);
 
 // Función para conexión WiFi
@@ -98,8 +141,9 @@ void tarea_1(void *pvParameters) {
     //IOT.Mqtt_Publish("sensor/acceleration", String(ax) + "," + String(ay) + "," + String(az));
     //IOT.Mqtt_Publish("sensor/gyroscope", String(gx) + "," + String(gy) + "," + String(gz));
 
+    recibirdatos();
     // **Encoders y Control de Motores** - Captura de datos de velocidad y posición
-    u = setpoint;  // Actualizar el voltaje de entrada según el setpoint recibido
+    u = joystickY;  // Actualizar el voltaje de entrada según el setpoint recibido
     OBJ.DRV8837_Voltage(DRVx1, u);
     OBJ.DRV8837_Voltage(DRVx2, u);
 
@@ -136,6 +180,10 @@ void tarea_1(void *pvParameters) {
 
 void setup() {
   Serial.begin(115200);
+
+  // Configurar el Bluetooth con el nombre único
+  configurarBluetooth();
+
   conectar_wifi();
   int pwm_hz = 20000;
   int encoder_res = 1280;
