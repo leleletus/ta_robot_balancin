@@ -3,11 +3,13 @@
 #include <XSpaceIoT.h>
 //#include <XSControl.h> // Required for motor control functions
 #include "WiFi.h"
+#include "wifi_credentials.h" // Incluir el archivo de credenciales
 #include <BluetoothSerial.h>
+
 
 // Configuración de la placa y variables
 XSpaceV21Board OBJ;
-XSThing IOT;
+// XSThing IOT;
 
 int Ts = 10; // Tiempo de muestreo en milisegundos
 double u = 5; // Voltaje de entrada
@@ -25,6 +27,10 @@ int k = 0; // Inicialización global
 BluetoothSerial SerialBT;
 uint16_t  joystickY = 0;
 String nombreDispositivo;
+
+float remap(int x, int in_min, int in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 
 // Función para generar un nombre único basado en la dirección MAC
 String genera_nombre_unico() {
@@ -49,12 +55,11 @@ void configurarBluetooth() {
 // Función para recibir la posición del joystick
 void recibirdatos() { // al enviar 0x01F401F4 recibo F4 01 F4 01 little-endian
   if (SerialBT.available()) { // Verificar si hay disponibles
-    uint8_t datos[2]; // para guardar los datos de 8 bits o sea 2 serian para x y 2 para y
-    SerialBT.readBytes(datos, 2); // Leer los 2 bytes
-
-    // Convertir los bytes en un valor de 16 bits
-    joystickY = (datos[1] << 8) | datos[0]; // Little-endian
-
+    // uint8_t datos[2]; // para guardar los datos de 8 bits o sea 2 serian para x y 2 para y
+    // SerialBT.readBytes(datos, 2); // Leer los 2 bytes
+    // joystickY = (datos[1] << 8) | datos[0]; // Little-endian
+    uint16_t number1;
+    SerialBT.readBytes((char*)&number1, sizeof(number1)); // Lee 2 bytes y los convierte en un número
 
     Serial.print(" Y: ");
     Serial.println(joystickY);
@@ -62,11 +67,6 @@ void recibirdatos() { // al enviar 0x01F401F4 recibo F4 01 F4 01 little-endian
   }
 }
 
-
-// Configuración de redes WiFi
-const char* ssidList[] = {"redpucp", "Machado Ferrer", "djvemo's S24U", "fibra-legacy-2.4Ghz"};
-const char* passwordList[] = {"C9AA28BA93", "0932Admin0", "0611000019", "V2Uh6u5V"};
-int numNetworks = sizeof(ssidList) / sizeof(ssidList[0]);
 
 // Función para conexión WiFi
 void conectar_wifi() {
@@ -131,19 +131,19 @@ void tarea_1(void *pvParameters) {
     // Mostrar datos de IMU en Serial
     Serial.print("Inclinación: "); 
     Serial.println(inclinacion);
-    Serial.print("Aceleración [x, y, z]: ");
-    Serial.print(ax); Serial.print("\t"); Serial.print(ay); Serial.print("\t"); Serial.println(az);
-    Serial.print("Giroscopio [x, y, z]: ");
-    Serial.print(gx); Serial.print("\t"); Serial.print(gy); Serial.print("\t"); Serial.println(gz);
+    Serial.print("Aceleración [x, y, z]:");
+    Serial.print("\t"); Serial.print(ax); Serial.print("\t"); Serial.print(ay); Serial.print("\t"); Serial.println(az);
+    Serial.print("Giroscopio [x, y, z]:");
+    Serial.print("\t"); Serial.print(gx); Serial.print("\t"); Serial.print(gy); Serial.print("\t"); Serial.println(gz);
 
     // Enviar datos de IMU a MQTT
-    IOT.Mqtt_Publish("sensor/inclinacion", inclinacion);
+    //IOT.Mqtt_Publish("sensor/inclinacion", inclinacion);
     //IOT.Mqtt_Publish("sensor/acceleration", String(ax) + "," + String(ay) + "," + String(az));
     //IOT.Mqtt_Publish("sensor/gyroscope", String(gx) + "," + String(gy) + "," + String(gz));
 
     recibirdatos();
     // **Encoders y Control de Motores** - Captura de datos de velocidad y posición
-    u = joystickY;  // Actualizar el voltaje de entrada según el setpoint recibido
+    u = remap(joystickY, 0, 1024, -5.0, 5.0);;  // Actualizar el voltaje de entrada según el setpoint recibido
     OBJ.DRV8837_Voltage(DRVx1, u);
     OBJ.DRV8837_Voltage(DRVx2, u);
 
@@ -161,13 +161,13 @@ void tarea_1(void *pvParameters) {
     Serial.print(vel_M2); Serial.print("\t"); Serial.println(pos_M2);
 
     // Enviar datos de velocidad y posición a MQTT
-    IOT.Mqtt_Publish("motor/velocidad_M1", vel_M1);
-    IOT.Mqtt_Publish("motor/posicion_M1", pos_M1);
-    IOT.Mqtt_Publish("motor/velocidad_M2", vel_M2);
-    IOT.Mqtt_Publish("motor/posicion_M2", pos_M2);
+    // IOT.Mqtt_Publish("motor/velocidad_M1", vel_M1);
+    // IOT.Mqtt_Publish("motor/posicion_M1", pos_M1);
+    // IOT.Mqtt_Publish("motor/velocidad_M2", vel_M2);
+    // IOT.Mqtt_Publish("motor/posicion_M2", pos_M2);
 
     // Verificar si hay nueva información publicada en el buffer MQTT
-    IOT.Mqtt_CheckBuffer();
+    //IOT.Mqtt_CheckBuffer();
 
     // Delay según el tiempo de muestreo
     vTaskDelay(Ts);
@@ -181,10 +181,14 @@ void tarea_1(void *pvParameters) {
 void setup() {
   Serial.begin(115200);
 
+
   // Configurar el Bluetooth con el nombre único
   configurarBluetooth();
 
-  conectar_wifi();
+  //conectar_wifi();
+
+
+
   int pwm_hz = 20000;
   int encoder_res = 1280;
 
@@ -196,11 +200,11 @@ void setup() {
   Serial.begin(115200);
 
 
-  IOT.Mqtt_SerialInfo(true);
-  IOT.Mqtt_init("www.xspace.pe", 1883, ref_sp);
-  IOT.Mqtt_Connect(WiFi.SSID().c_str(), WiFi.psk().c_str(), "djvemo_xspace");
-  // me suscribo para enviar datos del esp al server para verlo en el pc suscribiendome
-  IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
+  // IOT.Mqtt_SerialInfo(true);
+  // IOT.Mqtt_init("www.xspace.pe", 1883, ref_sp);
+  // IOT.Mqtt_Connect(WiFi.SSID().c_str(), WiFi.psk().c_str(), "djvemo_xspace");
+  // // me suscribo para enviar datos del esp al server para verlo en el pc suscribiendome
+  // IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
 
 
   xTaskCreatePinnedToCore(tarea_1, "Tarea1", 4000, NULL, 1, NULL, 0);
