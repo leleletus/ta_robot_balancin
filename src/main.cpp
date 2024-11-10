@@ -16,7 +16,7 @@ double u = 0; // Voltaje de entrada
 double setpoint=0; // Valor recibido para sp
 int pin1 = 0; // Pin 1 para acelerómetro
 int pin2 = 5; // Pin 2 para giroscopio
-double VM = 12.0; // Voltaje máximo del driver
+double VM = 5.0; // Voltaje máximo del driver
 float ax, ay, az; // Variables para aceleración
 float gx, gy, gz; // Variables para giroscopio
 double inclinacion; // Ángulo de inclinación
