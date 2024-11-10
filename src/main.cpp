@@ -13,10 +13,10 @@ XSpaceV21Board OBJ;
 
 int Ts = 10; // Tiempo de muestreo en milisegundos
 double u = 0; // Voltaje de entrada
-double setpoint=5; // Valor recibido para sp
+double setpoint=0; // Valor recibido para sp
 int pin1 = 0; // Pin 1 para acelerómetro
 int pin2 = 5; // Pin 2 para giroscopio
-double VM = 5; // Voltaje máximo del driver
+double VM = 12.0; // Voltaje máximo del driver
 float ax, ay, az; // Variables para aceleración
 float gx, gy, gz; // Variables para giroscopio
 double inclinacion; // Ángulo de inclinación
@@ -59,8 +59,8 @@ void recibirdatos() { // al enviar 0x01F401F4 recibo F4 01 F4 01 little-endian
     // SerialBT.readBytes(datos, 2); // Leer los 2 bytes
     // joystickY = (datos[1] << 8) | datos[0]; // Little-endian
     SerialBT.readBytes((char*)&joystickY, sizeof(joystickY)); // Lee 2 bytes y los convierte en un número
-    Serial.print(" Y: ");
-    Serial.println(joystickY);
+    //Serial.print(" Y: ");
+    //Serial.println(joystickY);
   }
 }
 
@@ -140,7 +140,8 @@ void tarea_1(void *pvParameters) {
 
     recibirdatos();
     // **Encoders y Control de Motores** - Captura de datos de velocidad y posición
-    u = remap(joystickY, 0, 1024, -5.0, 5.0);;  // Actualizar el voltaje de entrada según el setpoint recibido
+    setpoint = remap(joystickY, 0, 1024, -1*VM, VM);;  // Actualizar el voltaje de entrada según el setpoint recibido
+    u=setpoint;
     OBJ.DRV8837_Voltage(DRVx1, u);
     OBJ.DRV8837_Voltage(DRVx2, u);
 
@@ -148,6 +149,10 @@ void tarea_1(void *pvParameters) {
     pos_M1 = OBJ.GetEncoderPosition(E1, DEGREES);
     vel_M2 = OBJ.GetEncoderSpeed(E2, DEGREES_PER_SECOND);
     pos_M2 = OBJ.GetEncoderPosition(E2, DEGREES);
+
+
+    Serial.print("Voltaje : ");
+    Serial.println(u);
 
     // Mostrar datos de velocidad y posición en Serial
     Serial.print("Velocidad_M1:  Posición_M1:");
