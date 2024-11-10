@@ -12,7 +12,7 @@ XSpaceV21Board OBJ;
 // XSThing IOT;
 
 int Ts = 10; // Tiempo de muestreo en milisegundos
-double u = 5; // Voltaje de entrada
+double u = 0; // Voltaje de entrada
 double setpoint=5; // Valor recibido para sp
 int pin1 = 0; // Pin 1 para acelerómetro
 int pin2 = 5; // Pin 2 para giroscopio
@@ -25,7 +25,7 @@ int k = 0; // Inicialización global
 
 
 BluetoothSerial SerialBT;
-uint16_t  joystickY = 0;
+uint16_t  joystickY = 512;
 String nombreDispositivo;
 
 float remap(int x, int in_min, int in_max, float out_min, float out_max) {
@@ -58,12 +58,9 @@ void recibirdatos() { // al enviar 0x01F401F4 recibo F4 01 F4 01 little-endian
     // uint8_t datos[2]; // para guardar los datos de 8 bits o sea 2 serian para x y 2 para y
     // SerialBT.readBytes(datos, 2); // Leer los 2 bytes
     // joystickY = (datos[1] << 8) | datos[0]; // Little-endian
-    uint16_t number1;
-    SerialBT.readBytes((char*)&number1, sizeof(number1)); // Lee 2 bytes y los convierte en un número
-
+    SerialBT.readBytes((char*)&joystickY, sizeof(joystickY)); // Lee 2 bytes y los convierte en un número
     Serial.print(" Y: ");
     Serial.println(joystickY);
-
   }
 }
 
