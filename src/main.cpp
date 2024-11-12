@@ -1,10 +1,14 @@
 #include <Arduino.h>
+#include <SPI.h>
+#include <SPIFFS.h>
 #include <XSpaceV21.h>
 #include <XSpaceIoT.h>
 //#include <XSControl.h> // Required for motor control functions
 #include "WiFi.h"
 #include "wifi_credentials.h" // Incluir el archivo de credenciales
 #include <BluetoothSerial.h>
+
+bool recording = true; // Variable de control para la grabación
 
 
 // Configuración de la placa y variables
@@ -125,14 +129,6 @@ void tarea_1(void *pvParameters) {
     OBJ.BMI088_GetGyroData(&gx, &gy, &gz);
     inclinacion = OBJ.BMI088_GetPitch_Accel();
 
-    // Mostrar datos de IMU en Serial
-    Serial.print("Inclinación: "); 
-    Serial.println(inclinacion);
-    Serial.print("Aceleración [x, y, z]:");
-    Serial.print("\t"); Serial.print(ax); Serial.print("\t"); Serial.print(ay); Serial.print("\t"); Serial.println(az);
-    Serial.print("Giroscopio [x, y, z]:");
-    Serial.print("\t"); Serial.print(gx); Serial.print("\t"); Serial.print(gy); Serial.print("\t"); Serial.println(gz);
-
     // Enviar datos de IMU a MQTT
     //IOT.Mqtt_Publish("sensor/inclinacion", inclinacion);
     //IOT.Mqtt_Publish("sensor/acceleration", String(ax) + "," + String(ay) + "," + String(az));
@@ -153,6 +149,13 @@ void tarea_1(void *pvParameters) {
 
     Serial.print("Voltaje : ");
     Serial.println(u);
+    // Mostrar datos de IMU en Serial
+    Serial.print("Inclinación: "); 
+    Serial.println(inclinacion);
+    // Serial.print("Aceleración [x, y, z]:");
+    // Serial.print("\t"); Serial.print(ax); Serial.print("\t"); Serial.print(ay); Serial.print("\t"); Serial.println(az);
+    // Serial.print("Giroscopio [x, y, z]:");
+    // Serial.print("\t"); Serial.print(gx); Serial.print("\t"); Serial.print(gy); Serial.print("\t"); Serial.println(gz);
 
     // Mostrar datos de velocidad y posición en Serial
     Serial.print("Velocidad_M1:  Posición_M1:");
@@ -171,12 +174,62 @@ void tarea_1(void *pvParameters) {
     // Verificar si hay nueva información publicada en el buffer MQTT
     //IOT.Mqtt_CheckBuffer();
 
+    void log_datos();
+
     // Delay según el tiempo de muestreo
     vTaskDelay(Ts);
   }
 
   // Eliminar tarea en caso de salida del bucle (opcional, usualmente innecesario en FreeRTOS)
   vTaskDelete(NULL);
+}
+
+
+void log_datos() {
+  // Leer comandos del puerto serie
+  if (Serial.available()) {
+    char command = Serial.read();
+    if (command == 'n') {
+      recording = false;
+      Serial.println("Grabación detenida");
+    } else if (command == 'r') {
+      Serial.println("Mostrando datos:");
+      File file = SPIFFS.open("/datalog.txt", FILE_READ);
+      if (file) {
+        while (file.available()) {
+          Serial.write(file.read());
+        }
+        file.close();
+      } else {
+        Serial.println("Error al abrir el archivo para lectura");
+      }
+    }
+  }
+
+  // Grabar datos si la grabación está habilitada
+  if (recording) {
+    File file = SPIFFS.open("/datalog.txt", FILE_APPEND);
+    if (file) {
+      file.print("Voltaje : ");
+      file.println(u);
+      // Mostrar datos de IMU en Serial
+      file.print("Inclinación: "); 
+      file.println(inclinacion);
+
+      // Mostrar datos de velocidad y posición en Serial
+      file.print("Velocidad_M1:  Posición_M1:");
+      file.print(vel_M1); Serial.print("\t"); Serial.println(pos_M1);
+      file.print("Velocidad_M2:  Posición_M2:");
+      file.print(vel_M2); Serial.print("\t"); Serial.println(pos_M2);
+      
+      file.close();
+      Serial.println("Dato actualizado");
+    } else {
+      Serial.println("Error al abrir el archivo");
+    }
+  }
+
+
 }
 
 
@@ -190,6 +243,24 @@ void setup() {
   //conectar_wifi();
 
 
+  // Montar SPIFFS
+  if (!SPIFFS.begin(true)) {
+    Serial.println("Error al montar SPIFFS");
+    return;
+  }
+  Serial.println("SPIFFS montado correctamente");
+
+  // Crear o abrir el archivo y escribir datos
+  File file = SPIFFS.open("/datalog.txt", FILE_APPEND);
+  if (!file) {
+    Serial.println("Error al abrir el archivo");
+    return;
+  }
+
+  // Escribir datos en el archivo
+  file.println("Reiniciado datos nuevos:");
+  file.close();
+  Serial.println("empezando a guardar datos");
 
   int pwm_hz = 20000;
   int encoder_res = 1280;
@@ -209,7 +280,7 @@ void setup() {
   // IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
 
 
-  xTaskCreatePinnedToCore(tarea_1, "Tarea1", 4000, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(tarea_1, "Tarea1", 4000, NULL, 1, NULL, 0); //el ultimo indica el mucleo
   //xTaskCreatePinnedToCore(tarea_encoder, "Tarea2", 4000, NULL, 2, NULL, 0);
 }
 
