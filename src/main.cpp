@@ -13,7 +13,7 @@ bool recording = true; // Variable de control para la grabación
 
 // Configuración de la placa y variables
 XSpaceV21Board OBJ;
-// XSThing IOT;
+//XSThing IOT;
 
 int Ts = 10; // Tiempo de muestreo en milisegundos
 double u = 0; // Voltaje de entrada
@@ -134,12 +134,13 @@ void tarea_1(void *pvParameters) {
     //IOT.Mqtt_Publish("sensor/acceleration", String(ax) + "," + String(ay) + "," + String(az));
     //IOT.Mqtt_Publish("sensor/gyroscope", String(gx) + "," + String(gy) + "," + String(gz));
 
-    recibirdatos();
+    //recibirdatos();
     // **Encoders y Control de Motores** - Captura de datos de velocidad y posición
-    setpoint = remap(joystickY, 0, 1024, -1*VM, VM);;  // Actualizar el voltaje de entrada según el setpoint recibido
+    //setpoint = remap(joystickY, 0, 1024, -1*VM, VM);  // Actualizar el voltaje de entrada según el setpoint recibido
     u=setpoint;
     OBJ.DRV8837_Voltage(DRVx1, u);
     OBJ.DRV8837_Voltage(DRVx2, u);
+    //IOT.Mqtt_Publish("sensor/u", u);
 
     vel_M1 = OBJ.GetEncoderSpeed(E1, DEGREES_PER_SECOND);
     pos_M1 = OBJ.GetEncoderPosition(E1, DEGREES);
@@ -147,23 +148,25 @@ void tarea_1(void *pvParameters) {
     pos_M2 = OBJ.GetEncoderPosition(E2, DEGREES);
 
 
-    Serial.print("Voltaje : ");
-    Serial.println(u);
-    // Mostrar datos de IMU en Serial
-    Serial.print("Inclinación: "); 
-    Serial.println(inclinacion);
+    // Serial.print("Voltaje : ");
+    // Serial.println(u);
+    // // Mostrar datos de IMU en Serial
+    // Serial.print("Inclinación: "); 
+    // Serial.println(inclinacion);
+    
+
+    // // Mostrar datos de velocidad y posición en Serial
+    // Serial.print("Velocidad_M1:  Posición_M1:");
+    // Serial.print(vel_M1); Serial.print("\t"); Serial.println(pos_M1);
+    
+    // // Mostrar datos de velocidad y posición en Serial
+    // Serial.print("Velocidad_M2:  Posición_M2:");
+    // Serial.print(vel_M2); Serial.print("\t"); Serial.println(pos_M2);
+
     // Serial.print("Aceleración [x, y, z]:");
     // Serial.print("\t"); Serial.print(ax); Serial.print("\t"); Serial.print(ay); Serial.print("\t"); Serial.println(az);
     // Serial.print("Giroscopio [x, y, z]:");
     // Serial.print("\t"); Serial.print(gx); Serial.print("\t"); Serial.print(gy); Serial.print("\t"); Serial.println(gz);
-
-    // Mostrar datos de velocidad y posición en Serial
-    Serial.print("Velocidad_M1:  Posición_M1:");
-    Serial.print(vel_M1); Serial.print("\t"); Serial.println(pos_M1);
-    
-    // Mostrar datos de velocidad y posición en Serial
-    Serial.print("Velocidad_M2:  Posición_M2:");
-    Serial.print(vel_M2); Serial.print("\t"); Serial.println(pos_M2);
 
     // Enviar datos de velocidad y posición a MQTT
     // IOT.Mqtt_Publish("motor/velocidad_M1", vel_M1);
@@ -174,7 +177,7 @@ void tarea_1(void *pvParameters) {
     // Verificar si hay nueva información publicada en el buffer MQTT
     //IOT.Mqtt_CheckBuffer();
 
-    void log_datos();
+    
 
     // Delay según el tiempo de muestreo
     vTaskDelay(Ts);
@@ -238,7 +241,7 @@ void setup() {
 
 
   // Configurar el Bluetooth con el nombre único
-  configurarBluetooth();
+  //configurarBluetooth();
 
   //conectar_wifi();
 
@@ -275,7 +278,7 @@ void setup() {
 
   // IOT.Mqtt_SerialInfo(true);
   // IOT.Mqtt_init("www.xspace.pe", 1883, ref_sp);
-  // IOT.Mqtt_Connect(WiFi.SSID().c_str(), WiFi.psk().c_str(), "djvemo_xspace");
+  //IOT.Mqtt_Connect(WiFi.SSID().c_str(), WiFi.psk().c_str(), "djvemo_xspace");
   // // me suscribo para enviar datos del esp al server para verlo en el pc suscribiendome
   // IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
 
@@ -286,4 +289,5 @@ void setup() {
 
 void loop() {
   // Vacío ya que las tareas manejan la lógica
+  void log_datos();
 }
