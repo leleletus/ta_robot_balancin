@@ -1,73 +1,62 @@
+
+
 #include <Arduino.h>
 #include <XSpaceV21.h>
-//#include <SPI.h>
-//#include <SPIFFS.h>
 #include <XSpaceIoT.h>
-//#include <XSControl.h> // Required for motor control functions
+#include <XSControl.h>
 #include "WiFi.h"
 #include "wifi_credentials.h" // Incluir el archivo de credenciales
-//#include <BluetoothSerial.h>
 
-//bool recording = true; // Variable de control para la grabación
+// Definición de los pines para controlar los LEDs de estado
+#define RED 21
+#define GREEN 22
+#define BLUE 17
+#define OFF 0
 
+// Prototipos de funciones para el estado del LED y la obtención del voltaje de la batería
+void XSQC_2S_Shield_LedSTATUS(int color);
+double XSQC_2S_Shield_GetBatteryVoltage();
 
-// Configuración de la placa y variables
-XSpaceV21Board OBJ;
+// Instanciación de objetos para la interfaz con el hardware
+XSpaceV21Board XSBoard;
+XSFilter Filter_a, Filter_g;
+XSController Controller1, Controller2, Controller3;
 XSThing IOT;
-//BluetoothSerial SerialBT;
-//uint16_t  joystickY = 512;
-//String nombreDispositivo;
 
-int Ts = 10; // Tiempo de muestreo en milisegundos
-double u = 0; // Voltaje de entrada
+// Definición de constantes para la configuración del control del motor
+#define PWM_FREQUENCY 20000 // Frecuencia PWM para control de motor a 20 kHz para evitar ruido audible.
+#define ENCODER_RESOLUTION 960 // Resolución del codificador, típicamente el número de pasos por revolución.
+
+// Variables para almacenar datos brutos del sensor
+float gx, gy, gz; // Datos del giroscopio para el ángulo de inclinación
+float pitchAccel; // Ángulo de inclinación calculado a partir del acelerómetro
+float pitchAccel_filtered; // Ángulo de inclinación del acelerómetro filtrado
+float pitchGyro; // Ángulo de inclinación calculado a partir del giroscopio
+float pitchGyro_filtered; // Ángulo de inclinación del giroscopio filtrado
+
+// Variables para el filtro complementario
+float pitch = 0.0; // Ángulo de inclinación combinado
+const float alpha = 0.65; // Coeficiente del filtro complementario
+double equilibrium_angle = 0; // Ángulo de equilibrio del robot
 double setpoint=0; // Valor recibido para sp
-int pin1 = 0; // Pin 1 para acelerómetro
-int pin2 = 5; // Pin 2 para giroscopio
-double VM = 5.0; // Voltaje máximo del driver
-float ax, ay, az; // Variables para aceleración
-float gx, gy, gz; // Variables para giroscopio
-double inclinacion; // Ángulo de inclinación
-double vel_M1, vel_M2, pos_M1, pos_M2; // Velocidad y posición angular
-int k = 0; // Inicialización global
 
+// Variables para almacenar la velocidad y el punto de consigna de los motores
+double speed_m1;
+double speed_m2;
+double position_m1;
+double position_m2;
+double speed_m1_sp = 0; // Setpoint (punto de consigna) para el motor 1
+double speed_m2_sp = 0; // Setpoint (punto de consigna) para el motor 2
 
+// Función para recibir datos desde MQTT
+void ref_sp(char* topicx, byte* Data, unsigned int DataLen) {
+  String ReceivedData = String((char*)Data, DataLen);
+  String Topic = String((char*)topicx);
 
-// float remap(int x, int in_min, int in_max, float out_min, float out_max) {
-//   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-// }
-
-// Función para generar un nombre único basado en la dirección MAC
-// String genera_nombre_unico() {
-//   // Obtén la dirección MAC del ESP32
-//   String macAddress = WiFi.macAddress();
-
-//   // Extraer los últimos 2 bytes de la dirección MAC como sufijo
-//   String suffix = macAddress.substring(macAddress.length() - 5);  // Últimos 2 bytes de la MAC
-//   suffix.replace(":", "");  // Elimina los dos puntos (:) de la dirección MAC
-
-//   // Generar el nombre único para el dispositivo
-//   return "Balancin_" + suffix;
-// }
-
-// // Función para inicializar el Bluetooth con el nombre generado
-// void configurarBluetooth() {
-//   nombreDispositivo = genera_nombre_unico();
-//   SerialBT.begin(nombreDispositivo);  
-//   Serial.println("Bluetooth Iniciado con el nombre: " + nombreDispositivo);
-// }
-
-// Función para recibir la posición del joystick
-// void recibirdatos() { // al enviar 0x01F401F4 recibo F4 01 F4 01 little-endian
-//   if (SerialBT.available()) { // Verificar si hay disponibles
-//     // uint8_t datos[2]; // para guardar los datos de 8 bits o sea 2 serian para x y 2 para y
-//     // SerialBT.readBytes(datos, 2); // Leer los 2 bytes
-//     // joystickY = (datos[1] << 8) | datos[0]; // Little-endian
-//     SerialBT.readBytes((char*)&joystickY, sizeof(joystickY)); // Lee 2 bytes y los convierte en un número
-//     //Serial.print(" Y: ");
-//     //Serial.println(joystickY);
-//   }
-// }
-
+  if (Topic == "control/ref") {
+    setpoint = ReceivedData.toDouble(); // Pasamos de string a double
+  }
+}
 
 // Función para conexión WiFi
 void conectar_wifi() {
@@ -111,190 +100,173 @@ void conectar_wifi() {
   Serial.println(WiFi.localIP());
 }
 
-// Función para recibir datos desde MQTT
-void ref_sp(char* topicx, byte* Data, unsigned int DataLen) {
-  String RecivedData = String((char*)Data, DataLen);
-  String Topic = String((char*)topicx);
 
-  if (Topic == "control/ref") {
-    setpoint = RecivedData.toDouble(); // Pasamos de string a double
-  }
+// Tarea de filtrado: combina datos de acelerómetro y giroscopio para calcular el ángulo de inclinación
+void FilterTask(void *pv) {
+    pitch = XSBoard.BMI088_GetPitch_Accel(); // Inicializa la inclinación a partir del acelerómetro
+
+    while (1) {
+        // Recupera los últimos datos del giroscopio
+        XSBoard.BMI088_GetGyroData(&gx, &gy, &gz);
+        // Calcula el ángulo de inclinación del acelerómetro
+        float pitchAccel = XSBoard.BMI088_GetPitch_Accel();
+
+        // Integra los datos del giroscopio para obtener el cambio de inclinación
+        float pitchGyro = pitch + gy * 0.001; // gy en grados por segundo
+
+        // Aplica filtros de paso bajo de segundo orden a los datos
+        pitchAccel_filtered = Filter_a.SecondOrderLPF(pitchAccel, 35, 0.001);
+        pitchGyro_filtered  = Filter_g.SecondOrderLPF(pitchGyro, 35, 0.001);
+
+        // Filtro complementario para combinar datos del acelerómetro y giroscopio
+        pitch = alpha * pitchGyro_filtered + (1 - alpha) * pitchAccel_filtered;
+
+        vTaskDelay(1); // Retraso de 1 milisegundo (ajustar según la aplicación)
+    }
+
+    // Nunca se alcanza, pero se coloca por seguridad
+    vTaskDelete(NULL);
 }
 
-// void configurar_spiffs(){
+// Tarea del controlador de velocidad: ajusta el voltaje de los motores para seguir las velocidades deseadas
+void SpeedController(void *pv){
+    while(1){
+        // Obtiene la velocidad actual de los motores a partir de los codificadores
+        speed_m1 = XSBoard.GetEncoderSpeed(E1, DEGREES_PER_SECOND);
+        speed_m2 = XSBoard.GetEncoderSpeed(E2, DEGREES_PER_SECOND);
+        position_m1 = XSBoard.GetEncoderPosition(E1, DEGREES);
+        position_m2 = XSBoard.GetEncoderPosition(E2, DEGREES);
 
-//   // Montar SPIFFS
-//   if (!SPIFFS.begin(true)) {
-//     Serial.println("Error al montar SPIFFS");
-//     return;
-//   }
-//   Serial.println("SPIFFS montado correctamente");
+        // Aplica el controlador PI para ajustar el voltaje del motor
+        XSBoard.DRV8837_Voltage(DRVx1, Controller1.PI_ControlLaw(speed_m1, speed_m1_sp, 0.0241, 0.4820, FORWARD_EULER, 0.01));
+        XSBoard.DRV8837_Voltage(DRVx2, Controller2.PI_ControlLaw(speed_m2, speed_m2_sp, 0.0222, 0.4440, FORWARD_EULER, 0.01));
 
-//   // Crear o abrir el archivo y escribir datos
-//   File file = SPIFFS.open("/datalog.txt", FILE_APPEND);
-//   if (!file) {
-//     Serial.println("Error al abrir el archivo");
-//     return;
-//   }
+        vTaskDelay(10); // Pausa de 10 milisegundos entre mediciones de velocidad
+    }
 
-//   // Escribir datos en el archivo
-//   file.println("Reiniciado datos nuevos:");
-//   file.close();
-//   Serial.println("empezando a guardar datos");
-// }
+    // Nunca se alcanza, pero se coloca por seguridad
+    vTaskDelete(NULL);
+}
 
+// Tarea del controlador de ángulo: ajusta la velocidad de los motores para mantener el ángulo deseado
+void AngleController(void *pv){
+    float velx; // Velocidad calculada para los motores
 
+    double Kp = 50; // Ganancia proporcional
+    double Kd = 0; // Ganancia derivativa
+    double Ki = 120; // Ganancia integrativa
 
+    while(1){
+        // Calcula la velocidad deseada basada en el control PID
+        velx = Controller3.PID_ControlLaw(pitch, equilibrium_angle, Kp, Ki, FORWARD_EULER, Kd, FORWARD_EULER, 9.73920144223375, 0.02);
+        
+        // Ajusta los puntos de consigna de velocidad para los motores
+        speed_m1_sp = -velx;
+        speed_m2_sp = velx;
 
-// void log_datos() {
-//   // Leer comandos del puerto serie
-//   if (Serial.available()) {
-//     char command = Serial.read();
-//     if (command == 'n') {
-//       recording = false;
-//       Serial.println("Grabación detenida");
-//     } else if (command == 'r') {
-//       Serial.println("Mostrando datos:");
-//       File file = SPIFFS.open("/datalog.txt", FILE_READ);
-//       if (file) {
-//         while (file.available()) {
-//           Serial.write(file.read());
-//         }
-//         file.close();
-//       } else {
-//         Serial.println("Error al abrir el archivo para lectura");
-//       }
-//     }
-//   }
+        vTaskDelay(20); // Pausa de 20 milisegundos entre ajustes
+    }
 
-//   // Grabar datos si la grabación está habilitada
-//   if (recording) {
-//     File file = SPIFFS.open("/datalog.txt", FILE_APPEND);
-//     if (file) {
-//       file.print("Voltaje : ");
-//       file.println(u);
-//       // Mostrar datos de IMU en Serial
-//       file.print("Inclinación: "); 
-//       file.println(inclinacion);
+    // Nunca se alcanza, pero se coloca por seguridad
+    vTaskDelete(NULL);
+}
 
-//       // Mostrar datos de velocidad y posición en Serial
-//       file.print("Velocidad_M1:  Posición_M1:");
-//       file.print(vel_M1); Serial.print("\t"); Serial.println(pos_M1);
-//       file.print("Velocidad_M2:  Posición_M2:");
-//       file.print(vel_M2); Serial.print("\t"); Serial.println(pos_M2);
-      
-//       file.close();
-//       Serial.println("Dato actualizado");
-//     } else {
-//       Serial.println("Error al abrir el archivo");
-//     }
-//   }
+// Configuración inicial
+void setup() {
+    //Serial.begin(1000000); // Inicializa la comunicación serial a 1 Mbps para transmisión rápida de datos
+    Serial.begin(115200);
 
-
-// }
-
-
-// Tarea combinada para captura y envío de datos de aceleración, giroscopio, velocidad y posición angular
-void tarea_1(void *pvParameters) {
-  while (1) {
-    // **IMU** - Captura de datos de aceleración y giroscopio
-    OBJ.BMI088_GetAccelData(&ax, &ay, &az);
-    OBJ.BMI088_GetGyroData(&gx, &gy, &gz);
-    inclinacion = OBJ.BMI088_GetPitch_Accel();
-
-    // Enviar datos de IMU a MQTT
-    IOT.Mqtt_Publish("sensor/inclinacion", inclinacion);
-    //IOT.Mqtt_Publish("sensor/acceleration", String(ax) + "," + String(ay) + "," + String(az));
-    //IOT.Mqtt_Publish("sensor/gyroscope", String(gx) + "," + String(gy) + "," + String(gz));
-
-    // recibirdatos();
-    // // **Encoders y Control de Motores** - Captura de datos de velocidad y posición
-    // setpoint = remap(joystickY, 0, 1024, -1*VM, VM);  // Actualizar el voltaje de entrada según el setpoint recibido
-    u=setpoint;
-    OBJ.DRV8837_Voltage(DRVx1, u);
-    OBJ.DRV8837_Voltage(DRVx2, u);
-    IOT.Mqtt_Publish("sensor/u", u);
-
-    vel_M1 = OBJ.GetEncoderSpeed(E1, DEGREES_PER_SECOND);
-    pos_M1 = OBJ.GetEncoderPosition(E1, DEGREES);
-    vel_M2 = OBJ.GetEncoderSpeed(E2, DEGREES_PER_SECOND);
-    pos_M2 = OBJ.GetEncoderPosition(E2, DEGREES);
-
-
-    // Serial.print("Voltaje : ");
-    // Serial.println(u);
-    // // Mostrar datos de IMU en Serial
-    // Serial.print("Inclinación: "); 
-    // Serial.println(inclinacion);
+    conectar_wifi(); // Conexión a la red WiFi
     
+    // Obtiene el voltaje de la batería conectada al escudo XSQC-2S
+    double VM = XSQC_2S_Shield_GetBatteryVoltage();
 
-    // // Mostrar datos de velocidad y posición en Serial
-    // Serial.print("Velocidad_M1:  Posición_M1:");
-    // Serial.print(vel_M1); Serial.print("\t"); Serial.println(pos_M1);
-    
-    // // Mostrar datos de velocidad y posición en Serial
-    // Serial.print("Velocidad_M2:  Posición_M2:");
-    // Serial.print(vel_M2); Serial.print("\t"); Serial.println(pos_M2);
+    // Inicializa la placa XSpace con la frecuencia PWM y resolución del codificador
+    XSBoard.init(PWM_FREQUENCY, ENCODER_RESOLUTION, VM);
+    XSBoard.DRV8837_Wake(DRVx1); // Despierta el controlador del motor 1
+    XSBoard.DRV8837_Wake(DRVx2); // Despierta el controlador del motor 2
 
-    // Serial.print("Aceleración [x, y, z]:");
-    // Serial.print("\t"); Serial.print(ax); Serial.print("\t"); Serial.print(ay); Serial.print("\t"); Serial.println(az);
-    // Serial.print("Giroscopio [x, y, z]:");
-    // Serial.print("\t"); Serial.print(gx); Serial.print("\t"); Serial.print(gy); Serial.print("\t"); Serial.println(gz);
+    // Inicializa WiFi y conexión UDP para monitoreo
+    IOT.Mqtt_SerialInfo(true);
+    IOT.Mqtt_init("www.xspace.pe", 1883, ref_sp);
+    IOT.Mqtt_Connect(WiFi.SSID().c_str(), WiFi.psk().c_str(), "emf xspace");
+    // me suscribo para enviar datos del esp al server para verlo en el pc suscribiendome
+    IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
+    // Crea la tarea para el filtrado y cálculo del ángulo de inclinación
+    xTaskCreate(FilterTask, "FilterTask", 5000, NULL, 1, NULL);
 
-    // Enviar datos de velocidad y posición a MQTT
-    IOT.Mqtt_Publish("motor/velocidad_M1", vel_M1);
-    IOT.Mqtt_Publish("motor/posicion_M1", pos_M1);
-    IOT.Mqtt_Publish("motor/velocidad_M2", vel_M2);
-    IOT.Mqtt_Publish("motor/posicion_M2", pos_M2);
+    // Encuentra el ángulo de equilibrio inicial
+    XSQC_2S_Shield_LedSTATUS(BLUE); // LED azul indica calibración
+    for(int i = 0; i < 200; i++){
+        equilibrium_angle = pitch; // El ángulo de equilibrio es el valor promedio de inclinación
+        //XSnet.println(equilibrium_angle); // Envía el ángulo de equilibrio a través de la red
+        delay(10);
+    }
+    XSQC_2S_Shield_LedSTATUS(OFF); // Apaga el LED después de la calibración
+
+    delay(1000); // Pausa para asegurar que todo esté listo
+    XSQC_2S_Shield_LedSTATUS(GREEN); // LED verde indica que el robot está listo
+
+    // Crea las tareas para el control de velocidad y ángulo
+    xTaskCreate(SpeedController, "SpeedController", 5000, NULL, 1, NULL);
+    xTaskCreate(AngleController, "AngleController", 5000, NULL, 1, NULL);
+}
+
+// Bucle principal: transmite datos de inclinación y velocidad
+void loop() {
+    //XSnet.println(pitch); // Envia el ángulo de inclinación y la velocidad a través de la red
+
+    // Seguridad: si la inclinación supera 40 grados, detiene los motores
+    if(abs(pitch) > 40){
+        XSQC_2S_Shield_LedSTATUS(RED); // LED rojo indica un error
+        XSBoard.DRV8837_Sleep(DRVx1); // Pone a dormir el motor 1
+        XSBoard.DRV8837_Sleep(DRVx2); // Pone a dormir el motor 2
+        //delay(1000000); // Espera indefinidamente para seguridad
+    }
+
+    // Enviar por MQTT la inclinación del robot, la velocidad y la posición de los motores
+
+    // Creamos primero un string con todos los datos a enviar
+    String data = "pitch: " + String(pitch) + ", speed_m1: " + String(speed_m1) + ", speed_m2: " + String(speed_m2) + ", position_m1: " + String(position_m1) + ", position_m2: " + String(position_m2);
+    // Convertimos el string a un array de caracteres
+    char data_array[data.length() + 1];
+    data.toCharArray(data_array, data.length() + 1);
+    // Enviamos el array de caracteres por MQTT
+    IOT.Mqtt_Publish("robot/data", data_array);
 
     // Verificar si hay nueva información publicada en el buffer MQTT
     IOT.Mqtt_CheckBuffer();
 
-    
-
-    // Delay según el tiempo de muestreo
-    vTaskDelay(Ts);
-  }
-
-  // Eliminar tarea en caso de salida del bucle (opcional, usualmente innecesario en FreeRTOS)
-  vTaskDelete(NULL);
+    delay(10); // Pausa de 10ms entre envíos de datos
 }
 
-
-void setup() {
-  Serial.begin(115200);
-
-
-  // Configurar el Bluetooth con el nombre único
-  // configurarBluetooth();
-
-  conectar_wifi();
-
-  //configurar_spiffs();
-
-  int pwm_hz = 20000;
-  int encoder_res = 1280;
-
-  OBJ.init(pwm_hz, encoder_res, VM);
-  OBJ.BMI088_init(pin1, pin2);
-  OBJ.DRV8837_Wake();
-
-
-
-  IOT.Mqtt_SerialInfo(true);
-  IOT.Mqtt_init("www.xspace.pe", 1883, ref_sp);
-  IOT.Mqtt_Connect(WiFi.SSID().c_str(), WiFi.psk().c_str(), "djvemo_xspace");
-  // me suscribo para enviar datos del esp al server para verlo en el pc suscribiendome
-  IOT.Mqtt_Suscribe("control/ref"); //se susbribe a un topic, lo yo le mando un valor desde pc en publish
-
-
-  xTaskCreatePinnedToCore(tarea_1, "Tarea1", 4000, NULL, 1, NULL, 0); //el ultimo indica el mucleo
-  //xTaskCreatePinnedToCore(tarea_encoder, "Tarea2", 4000, NULL, 2, NULL, 0);
+double XSQC_2S_Shield_GetBatteryVoltage(){
+    return (double)analogRead(36)/4096.0*3.3*4.0;
 }
 
+void XSQC_2S_Shield_LedSTATUS(int color){
+    pinMode(22,OUTPUT); //STATUS GREEN LED
+    pinMode(21,OUTPUT); //STATUS RED LED
+    pinMode(17,OUTPUT); //STATUS BLUE LED
 
-
-void loop() {
-  // Vacío ya que las tareas manejan la lógica
-  //void log_datos();
+        if(color == RED){
+            digitalWrite(RED,HIGH);
+            digitalWrite(GREEN,LOW);
+            digitalWrite(BLUE,LOW);
+        } 
+        if(color == GREEN){
+            digitalWrite(RED,LOW);
+            digitalWrite(GREEN,HIGH);
+            digitalWrite(BLUE,LOW);
+        }
+        if(color == BLUE){
+            digitalWrite(RED,LOW);
+            digitalWrite(GREEN,LOW);
+            digitalWrite(BLUE,HIGH);
+        } 
+        if(color == OFF){
+            digitalWrite(RED,LOW);
+            digitalWrite(GREEN,LOW);
+            digitalWrite(BLUE,LOW);
+        } 
 }
