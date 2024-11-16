@@ -27,6 +27,8 @@ XSThing IOT;
 #define PWM_FREQUENCY 20000 // Frecuencia PWM para control de motor a 20 kHz para evitar ruido audible.
 #define ENCODER_RESOLUTION 960 // Resolución del codificador, típicamente el número de pasos por revolución.
 
+double u1,u2;
+
 // Variables para almacenar datos brutos del sensor
 float gx, gy, gz; // Datos del giroscopio para el ángulo de inclinación
 float pitchAccel; // Ángulo de inclinación calculado a partir del acelerómetro
@@ -137,9 +139,12 @@ void SpeedController(void *pv){
         position_m1 = XSBoard.GetEncoderPosition(E1, DEGREES);
         position_m2 = XSBoard.GetEncoderPosition(E2, DEGREES);
 
+        u1=Controller1.PI_ControlLaw(speed_m1, speed_m1_sp, 0.0241, 0.4820, FORWARD_EULER, 0.01);
+        u2=Controller2.PI_ControlLaw(speed_m2, speed_m2_sp, 0.0222, 0.4440, FORWARD_EULER, 0.01);
+
         // Aplica el controlador PI para ajustar el voltaje del motor
-        XSBoard.DRV8837_Voltage(DRVx1, Controller1.PI_ControlLaw(speed_m1, speed_m1_sp, 0.0241, 0.4820, FORWARD_EULER, 0.01));
-        XSBoard.DRV8837_Voltage(DRVx2, Controller2.PI_ControlLaw(speed_m2, speed_m2_sp, 0.0222, 0.4440, FORWARD_EULER, 0.01));
+        XSBoard.DRV8837_Voltage(DRVx1, u1);
+        XSBoard.DRV8837_Voltage(DRVx2, u2);
 
         vTaskDelay(10); // Pausa de 10 milisegundos entre mediciones de velocidad
     }
@@ -227,7 +232,7 @@ void loop() {
     // Enviar por MQTT la inclinación del robot, la velocidad y la posición de los motores
 
     // Creamos primero un string con todos los datos a enviar
-    String data = "pitch: " + String(pitch) + ", speed_m1: " + String(speed_m1) + ", speed_m2: " + String(speed_m2) + ", position_m1: " + String(position_m1) + ", position_m2: " + String(position_m2);
+    String data = "v1: " + String(u1) + ", v2: " + String(u2) + ", pitch: " + String(pitch) + ", speed_m1: " + String(speed_m1) + ", speed_m2: " + String(speed_m2) + ", position_m1: " + String(position_m1) + ", position_m2: " + String(position_m2);
     // Convertimos el string a un array de caracteres
     char data_array[data.length() + 1];
     data.toCharArray(data_array, data.length() + 1);
